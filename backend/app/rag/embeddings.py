@@ -1,7 +1,7 @@
 import os
 import httpx
 from typing import List
-from backend.app.config.settings import settings
+from app.config.settings import settings
 
 # Attempt to import sentence-transformers for local semantic search
 try:

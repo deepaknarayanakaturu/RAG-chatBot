@@ -1,8 +1,8 @@
 from datetime import datetime
 from collections import defaultdict
 from sqlalchemy.orm import Session
-from backend.app.database.models import Document, ChatSession, ChatMessage
-from backend.app.schemas.dashboard import DashboardStatsResponse, ChatCountByDate
+from app.database.models import Document, ChatSession, ChatMessage
+from app.schemas.dashboard import DashboardStatsResponse, ChatCountByDate
 
 def get_dashboard_stats(db: Session, user_id: int) -> DashboardStatsResponse:
     # 1. Fetch total documents

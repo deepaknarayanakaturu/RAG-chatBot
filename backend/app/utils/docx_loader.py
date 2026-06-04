@@ -1,8 +1,8 @@
-import docx
+from docx import Document
 
 def load_docx(file_path: str) -> str:
     try:
-        doc = docx.Document(file_path)
+        doc = Document(file_path)
         text = []
         for paragraph in doc.paragraphs:
             text.append(paragraph.text)

@@ -1,13 +1,13 @@
 import os
 import shutil
 from sqlalchemy.orm import Session
-from backend.app.config.settings import settings
-from backend.app.database.models import Document, DocumentChunk
-from backend.app.utils.pdf_loader import load_pdf
-from backend.app.utils.docx_loader import load_docx
-from backend.app.utils.txt_loader import load_txt
-from backend.app.rag.chunking import split_text
-from backend.app.rag.embeddings import embeddings_generator
+from app.config.settings import settings
+from app.database.models import Document, DocumentChunk
+from app.utils.pdf_loader import load_pdf
+from app.utils.docx_loader import load_docx
+from app.utils.txt_loader import load_txt
+from app.rag.chunking import split_text
+from app.rag.embeddings import embeddings_generator
 
 def process_document(db: Session, filename: str, temp_file_path: str, user_id: int) -> Document:
     # 1. Determine extension and upload destination

@@ -1,16 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from backend.app.database.db import get_db
-from backend.app.database.models import User, ChatSession, ChatMessage
-from backend.app.schemas.chat import (
+from app.database.db import get_db
+from app.database.models import User, ChatSession, ChatMessage
+from app.schemas.chat import (
     ChatSessionCreate,
     ChatSessionResponse,
     ChatMessageResponse,
     ChatQueryResponse
 )
-from backend.app.api.auth import get_current_user
-from backend.app.services.chat_service import get_or_create_session, run_chat_query
+from app.api.auth import get_current_user
+from app.services.chat_service import get_or_create_session, run_chat_query
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 

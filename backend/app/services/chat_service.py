@@ -1,9 +1,9 @@
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
-from backend.app.database.models import ChatSession, ChatMessage
-from backend.app.rag.retriever import retrieve_context
-from backend.app.rag.qa_chain import generate_answer_from_context
-from backend.app.schemas.chat import ChatQueryResponse, SourceNode
+from app.database.models import ChatSession, ChatMessage
+from app.rag.retriever import retrieve_context
+from app.rag.qa_chain import generate_answer_from_context
+from app.schemas.chat import ChatQueryResponse, SourceNode
 
 def get_or_create_session(db: Session, user_id: int, session_id: Optional[int] = None, title: str = "New Chat") -> ChatSession:
     if session_id:

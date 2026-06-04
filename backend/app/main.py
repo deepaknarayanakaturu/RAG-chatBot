@@ -4,8 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from backend.app.database.db import engine, Base
-from backend.app.api import auth, documents, chat, dashboard
+from app.database.db import engine, Base
+from app.api import auth, documents, chat, dashboard
 
 # 1. Create database tables on startup
 Base.metadata.create_all(bind=engine)

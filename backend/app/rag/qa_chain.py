@@ -1,7 +1,7 @@
 import httpx
 from typing import List, Tuple
-from backend.app.config.settings import settings
-from backend.app.database.models import DocumentChunk
+from app.config.settings import settings
+from app.database.models import DocumentChunk
 
 def generate_answer_from_context(
     query: str,

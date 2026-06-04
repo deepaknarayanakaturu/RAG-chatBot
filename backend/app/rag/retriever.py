@@ -1,8 +1,8 @@
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
-from backend.app.rag.embeddings import embeddings_generator
-from backend.app.rag.vector_store import query_similar_chunks
-from backend.app.database.models import DocumentChunk
+from app.rag.embeddings import embeddings_generator
+from app.rag.vector_store import query_similar_chunks
+from app.database.models import DocumentChunk
 
 def retrieve_context(
     db: Session,

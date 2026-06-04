@@ -4,11 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
-from backend.app.database.db import get_db
-from backend.app.database.models import User, Document
-from backend.app.schemas.document import DocumentResponse
-from backend.app.api.auth import get_current_user
-from backend.app.services.document_service import process_document, delete_document
+from app.database.db import get_db
+from app.database.models import User, Document
+from app.schemas.document import DocumentResponse
+from app.api.auth import get_current_user
+from app.services.document_service import process_document, delete_document
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
