@@ -46,7 +46,7 @@ Since Node.js is not on the system PATH, you can run the entire application (inc
 ### 1. Start the FastAPI Server
 Open a terminal in the project root directory and execute:
 ```powershell
-.\venv\Scripts\uvicorn.exe backend.app.main:app --reload
+.\venv\Scripts\uvicorn.exe app.main:app --reload
 ```
 
 ### 2. Open the Application
