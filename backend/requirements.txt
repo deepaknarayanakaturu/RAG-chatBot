@@ -1,11 +1,27 @@
+# Web Framework & Server
 fastapi
-uvicorn
+uvicorn[standard]
+pydantic[email]
+
+# Database
 sqlalchemy
 psycopg2-binary
-python-jose
-passlib[bcrypt]
+
+# Authentication
+python-jose[cryptography]
+bcrypt
 python-multipart
+
+# Configuration
 python-dotenv
-email-validator
+
+# Document Loaders
 python-docx
 pypdf
+
+# HTTP Client
+httpx
+
+# RAG / Embeddings
+scikit-learn
+sentence-transformers
