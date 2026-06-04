@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+venv/
+.venv/
+ENV/
+
+# Databases & Vector store temporary files
+*.db
+*.sqlite
+backend/uploads/pdfs/*
+backend/uploads/docx/*
+backend/uploads/txt/*
+!backend/uploads/pdfs/.gitkeep
+!backend/uploads/docx/.gitkeep
+!backend/uploads/txt/.gitkeep
+
+# Node.js / React
+node_modules/
+dist/
+dist-ssr/
+*.local
+.eslintcache
+
+# IDE / System
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

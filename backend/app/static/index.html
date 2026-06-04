@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart RAG Assistant & Dashboard</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;550;600;700;900&display=swap" rel="stylesheet">
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f5f7ff',
+              100: '#ebf0ff',
+              500: '#3b82f6',
+              600: '#2563eb',
+              900: '#1e3a8a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="h-full bg-slate-950 text-slate-100 antialiased flex flex-col overflow-hidden">
+
+  <!-- Main Container -->
+  <div id="app" class="h-full w-full flex flex-col overflow-hidden">
+    <!-- View will be injected here -->
+    <div class="flex h-screen w-screen items-center justify-center bg-slate-950">
+      <div class="flex flex-col items-center gap-3">
+        <div class="h-10 w-10 animate-spin rounded-full border-4 border-blue-500 border-t-transparent"></div>
+        <span class="text-slate-450 text-sm font-semibold">Initializing RAG Engine...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- State & App Script -->
+  <script>
+    // 1. Application State
+    const state = {
+      token: localStorage.getItem('token') || null,
+      user: null,
+      currentView: 'dashboard', // dashboard, chat, documents, settings
+      sidebarOpen: false,
+      
+      // Dashboard Stats
+      stats: null,
+      recentDocs: [],
+      
+      // Chat Variables
+      sessions: [],
+      activeSessionId: null,
+      messages: [],
+      sources: [],
+      chatLoading: false,
+      chatError: '',
+      selectedDocFilters: [],
+      
+      // Documents list
+      documents: [],
+      uploadStatus: 'idle', // idle, uploading, success, error
+      uploadError: '',
+      uploadDetails: null,
+    };
+
+    // Helper: Auth Headers
+    const getHeaders = (isMultipart = false) => {
+      const h = { 'Authorization': `Bearer ${state.token}` };
+      if (!isMultipart) {
+        h['Content-Type'] = 'application/json';
+      }
+      return h;
+    };
+
+    // Format file sizes
+    const formatBytes = (bytes) => {
+      if (!bytes || bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    };
+
+    // 2. Initialize App
+    const initApp = async () => {
+      if (state.token) {
+        try {
+          const res = await fetch('/api/auth/me', { headers: getHeaders() });
+          if (res.ok) {
+            state.user = await res.json();
+            await loadViewData(state.currentView);
+          } else {
+            logout();
+          }
+        } catch (err) {
+          console.error("Auth check failed", err);
+          logout();
+        }
+      } else {
+        renderAuthView('login');
+      }
+    };
+
+    // Log out user
+    const logout = () => {
+      localStorage.removeItem('token');
+      state.token = null;
+      state.user = null;
+      state.currentView = 'dashboard';
+      renderAuthView('login');
+    };
+
+    // Switch active view
+    const switchView = async (view) => {
+      state.currentView = view;
+      state.sidebarOpen = false;
+      renderAppLayout();
+      await loadViewData(view);
+    };
+
+    // Load data needed for specific views
+    const loadViewData = async (view) => {
+      const container = document.getElementById('view-content');
+      if (container) {
+        container.innerHTML = `
+          <div class="flex h-[60vh] items-center justify-center">
+            <i data-lucide="loader" class="h-8 w-8 text-blue-500 animate-spin"></i>
+          </div>
+        `;
+        lucide.createIcons();
+      }
+
+      try {
+        if (view === 'dashboard') {
+          const statsRes = await fetch('/api/dashboard/stats', { headers: getHeaders() });
+          state.stats = statsRes.ok ? await statsRes.json() : null;
+          
+          const docsRes = await fetch('/api/documents', { headers: getHeaders() });
+          state.recentDocs = docsRes.ok ? (await docsRes.json()).slice(0, 4) : [];
+          
+          renderDashboard();
+        } else if (view === 'documents') {
+          const docsRes = await fetch('/api/documents', { headers: getHeaders() });
+          state.documents = docsRes.ok ? await docsRes.json() : [];
+          renderDocuments();
+        } else if (view === 'chat') {
+          const sessRes = await fetch('/api/chat/sessions', { headers: getHeaders() });
+          state.sessions = sessRes.ok ? await sessRes.json() : [];
+          
+          const docsRes = await fetch('/api/documents', { headers: getHeaders() });
+          state.documents = docsRes.ok ? (await docsRes.json()).filter(d => d.status === 'completed') : [];
+          
+          if (state.sessions.length > 0 && !state.activeSessionId) {
+            await selectChatSession(state.sessions[0].id);
+          } else if (state.activeSessionId) {
+            await selectChatSession(state.activeSessionId);
+          } else {
+            renderChat();
+          }
+        } else if (view === 'settings') {
+          renderSettings();
+        }
+      } catch (err) {
+        console.error("Failed to load view data", err);
+        if (container) {
+          container.innerHTML = `
+            <div class="flex items-center gap-2 rounded-xl bg-red-950/20 border border-red-900/40 p-4 text-sm text-red-400 m-6">
+              <i data-lucide="alert-circle" class="h-5 w-5 shrink-0"></i>
+              <p>Failed to load data. Please verify your connection status.</p>
+            </div>
+          `;
+          lucide.createIcons();
+        }
+      }
+    };
+
+    // 3. Auth Layouts (Login/Register)
+    const renderAuthView = (type = 'login') => {
+      const appDiv = document.getElementById('app');
+      appDiv.className = "h-full w-full flex flex-col overflow-hidden bg-slate-950";
+      
+      appDiv.innerHTML = `
+        <div class="flex min-h-screen items-center justify-center px-4 py-12 text-slate-100 sm:px-6 lg:px-8">
+          <div class="w-full max-w-md space-y-8 rounded-3xl border border-slate-900 bg-slate-900/40 p-8 backdrop-blur-md shadow-2xl">
+            <!-- Header -->
+            <div class="text-center">
+              <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600/10 border border-blue-500/30 text-blue-400">
+                <i data-lucide="brain-circuit" class="h-7 w-7 animate-pulse"></i>
+              </div>
+              <h2 class="mt-6 text-3xl font-extrabold tracking-tight text-white">
+                ${type === 'login' ? 'Welcome back' : 'Create account'}
+              </h2>
+              <p class="mt-2 text-sm text-slate-400">
+                ${type === 'login' ? 'Sign in to access your custom RAG index' : 'Start indexing your documents and chatting semantically'}
+              </p>
+            </div>
+
+            <!-- Error Banner -->
+            <div id="auth-error" class="hidden flex items-center gap-2 rounded-xl bg-red-950/20 border border-red-900/40 p-4 text-sm text-red-400">
+              <i data-lucide="alert-circle" class="h-5 w-5 shrink-0"></i>
+              <p id="auth-error-msg"></p>
+            </div>
+
+            <!-- Form -->
+            <form id="auth-form" class="mt-8 space-y-5">
+              ${type === 'register' ? `
+                <div class="space-y-1.5">
+                  <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Username</label>
+                  <div class="relative">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500">
+                      <i data-lucide="user" class="h-5 w-5"></i>
+                    </span>
+                    <input type="text" id="username" required class="w-full rounded-xl border border-slate-800 bg-slate-900 py-3 pl-11 pr-4 text-sm text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="johndoe">
+                  </div>
+                </div>
+              ` : ''}
+
+              <div class="space-y-1.5">
+                <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Email or Username</label>
+                <div class="relative">
+                  <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500">
+                    <i data-lucide="mail" class="h-5 w-5"></i>
+                  </span>
+                  <input type="text" id="email" required class="w-full rounded-xl border border-slate-800 bg-slate-900 py-3 pl-11 pr-4 text-sm text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="you@example.com or username">
+                </div>
+              </div>
+
+              <div class="space-y-1.5">
+                <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Password</label>
+                <div class="relative">
+                  <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500">
+                    <i data-lucide="key-round" class="h-5 w-5"></i>
+                  </span>
+                  <input type="password" id="password" required class="w-full rounded-xl border border-slate-800 bg-slate-900 py-3 pl-11 pr-4 text-sm text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="••••••••">
+                </div>
+              </div>
+
+              <button type="submit" id="auth-submit" class="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/10 transition hover:bg-blue-500 focus:outline-none">
+                <span id="auth-btn-text">${type === 'login' ? 'Sign In' : 'Sign Up'}</span>
+              </button>
+            </form>
+
+            <div class="text-center text-sm text-slate-500 pt-4 border-t border-slate-900/50">
+              ${type === 'login' ? `
+                Don't have an account? 
+                <button onclick="renderAuthView('register')" class="font-semibold text-blue-500 hover:text-blue-400">Sign up</button>
+              ` : `
+                Already have an account? 
+                <button onclick="renderAuthView('login')" class="font-semibold text-blue-500 hover:text-blue-400">Sign in</button>
+              `}
+            </div>
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+
+      // Hook form submit
+      document.getElementById('auth-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const errDiv = document.getElementById('auth-error');
+        const btn = document.getElementById('auth-submit');
+        const btnTxt = document.getElementById('auth-btn-text');
+        
+        errDiv.classList.add('hidden');
+        btn.disabled = true;
+        btnTxt.innerText = type === 'login' ? 'Verifying...' : 'Registering...';
+
+        const emailVal = document.getElementById('email').value;
+        const passwordVal = document.getElementById('password').value;
+        const usernameVal = type === 'register' ? document.getElementById('username').value : null;
+
+        try {
+          if (type === 'login') {
+            const isEmail = emailVal.includes('@');
+            const payload = {
+              email: isEmail ? emailVal : undefined,
+              username: !isEmail ? emailVal : undefined,
+              password: passwordVal,
+            };
+
+            const res = await fetch('/api/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              localStorage.setItem('token', data.access_token);
+              state.token = data.access_token;
+              
+              // Load Profile
+              const meRes = await fetch('/api/auth/me', { headers: getHeaders() });
+              state.user = await meRes.json();
+              
+              // Switch to dashboard
+              renderAppLayout();
+              await switchView('dashboard');
+            } else {
+              const err = await res.json();
+              throw new Error(err.detail || 'Incorrect password or username');
+            }
+          } else {
+            // Register
+            const res = await fetch('/api/auth/register', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: usernameVal, email: emailVal, password: passwordVal })
+            });
+
+            if (res.ok) {
+              // Success, toggle login
+              errDiv.className = "flex items-center gap-2 rounded-xl bg-emerald-950/20 border border-emerald-900/40 p-4 text-sm text-emerald-400";
+              document.getElementById('auth-error-msg').innerText = "Registration complete! Switching to Sign In...";
+              errDiv.classList.remove('hidden');
+              lucide.createIcons();
+              setTimeout(() => {
+                renderAuthView('login');
+              }, 2000);
+            } else {
+              const err = await res.json();
+              throw new Error(err.detail || 'Email/username is already registered.');
+            }
+          }
+        } catch (err) {
+          errDiv.className = "flex items-center gap-2 rounded-xl bg-red-950/20 border border-red-900/40 p-4 text-sm text-red-400";
+          document.getElementById('auth-error-msg').innerText = err.message;
+          errDiv.classList.remove('hidden');
+          lucide.createIcons();
+          btn.disabled = false;
+          btnTxt.innerText = type === 'login' ? 'Sign In' : 'Sign Up';
+        }
+      });
+    };
+
+    // 4. Main App Frame (Sidebar + Top bar + Content pane)
+    const renderAppLayout = () => {
+      const appDiv = document.getElementById('app');
+      appDiv.className = "flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 font-sans";
+      
+      appDiv.innerHTML = `
+        <!-- Sidebar Drawer -->
+        <aside id="sidebar-drawer" class="fixed bottom-0 top-0 left-0 z-50 flex w-64 flex-col border-r border-slate-800 bg-slate-950 transition-transform duration-300 lg:static lg:translate-x-0 -translate-x-full">
+          <div class="flex h-16 items-center justify-between px-6 border-b border-slate-800">
+            <div class="flex items-center gap-2">
+              <i data-lucide="brain-circuit" class="h-7 w-7 text-blue-500 animate-pulse"></i>
+              <span class="text-lg font-black tracking-wider text-white">RAG.AI</span>
+            </div>
+            <button onclick="toggleSidebar(false)" class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white lg:hidden">
+              <i data-lucide="x" class="h-5 w-5"></i>
+            </button>
+          </div>
+
+          <nav class="flex-1 space-y-1.5 px-4 py-6">
+            <button id="nav-dashboard" onclick="switchView('dashboard')" class="flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-sm font-medium transition-all text-slate-400 hover:bg-slate-900 hover:text-slate-100">
+              <i data-lucide="layout-dashboard" class="h-5 w-5"></i> Dashboard
+            </button>
+            <button id="nav-chat" onclick="switchView('chat')" class="flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-sm font-medium transition-all text-slate-400 hover:bg-slate-900 hover:text-slate-100">
+              <i data-lucide="message-square" class="h-5 w-5"></i> RAG Chat
+            </button>
+            <button id="nav-documents" onclick="switchView('documents')" class="flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-sm font-medium transition-all text-slate-400 hover:bg-slate-900 hover:text-slate-100">
+              <i data-lucide="files" class="h-5 w-5"></i> Documents
+            </button>
+            <button id="nav-settings" onclick="switchView('settings')" class="flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-sm font-medium transition-all text-slate-400 hover:bg-slate-900 hover:text-slate-100">
+              <i data-lucide="settings" class="h-5 w-5"></i> Settings
+            </button>
+          </nav>
+
+          <div class="border-t border-slate-900 p-6 text-center text-xs text-slate-600">
+            <p>© 2026 Smart RAG Inc.</p>
+            <p class="mt-1">Version 1.0.0</p>
+          </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <div class="flex flex-1 flex-col overflow-hidden">
+          <!-- Sticky Header -->
+          <header class="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-slate-800 bg-slate-900/80 px-6 backdrop-blur-md">
+            <div class="flex items-center gap-4">
+              <button onclick="toggleSidebar(true)" class="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white lg:hidden">
+                <i data-lucide="menu" class="h-6 w-6"></i>
+              </button>
+              <h1 id="view-title" class="text-xl font-bold tracking-tight text-white">Smart RAG Assistant</h1>
+            </div>
+
+            <div class="flex items-center gap-4">
+              <div class="flex items-center gap-2 rounded-full bg-slate-800 px-4 py-1.5 text-sm text-slate-300">
+                <i data-lucide="user" class="h-4 w-4 text-blue-400"></i>
+                <span class="font-medium text-slate-200">${state.user?.username || 'User'}</span>
+              </div>
+
+              <button onclick="logout()" class="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/50 px-3.5 py-1.5 text-sm font-medium text-slate-300 transition hover:bg-red-950/30 hover:text-red-400 hover:border-red-900">
+                <i data-lucide="log-out" class="h-4 w-4"></i>
+                <span class="hidden sm:inline">Logout</span>
+              </button>
+            </div>
+          </header>
+
+          <!-- Dynamic View Container -->
+          <main id="view-content" class="flex-1 overflow-y-auto bg-slate-950">
+            <!-- View-specific HTML is injected here -->
+          </main>
+        </div>
+
+        <!-- Mobile overlay -->
+        <div id="mobile-overlay" onclick="toggleSidebar(false)" class="hidden fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-sm lg:hidden"></div>
+      `;
+      lucide.createIcons();
+    };
+
+    const toggleSidebar = (open) => {
+      state.sidebarOpen = open;
+      const drawer = document.getElementById('sidebar-drawer');
+      const overlay = document.getElementById('mobile-overlay');
+      if (open) {
+        drawer.classList.remove('-translate-x-full');
+        overlay.classList.remove('hidden');
+      } else {
+        drawer.classList.add('-translate-x-full');
+        overlay.classList.add('hidden');
+      }
+    };
+
+    // 5. Render Dashboard View
+    const renderDashboard = () => {
+      updateNavStyles('nav-dashboard', 'Dashboard');
+      
+      const container = document.getElementById('view-content');
+      
+      // Calculate SVG parameters
+      const timeline = state.stats?.chat_timeline || [{ date: 'Today', count: 0 }];
+      const maxCount = Math.max(...timeline.map((t) => t.count), 5);
+      
+      const svgWidth = 500;
+      const svgHeight = 200;
+      const padding = 30;
+      
+      const points = timeline.map((t, idx) => {
+        const x = padding + (idx * (svgWidth - padding * 2)) / Math.max(timeline.length - 1, 1);
+        const y = svgHeight - padding - (t.count * (svgHeight - padding * 2)) / maxCount;
+        return { x, y, ...t };
+      });
+
+      let linePath = '';
+      let areaPath = '';
+      if (points.length > 0) {
+        linePath = `M ${points[0].x} ${points[0].y} ` + points.slice(1).map((p) => `L ${p.x} ${p.y}`).join(' ');
+        areaPath = `${linePath} L ${points[points.length - 1].x} ${svgHeight - padding} L ${points[0].x} ${svgHeight - padding} Z`;
+      }
+
+      const dist = state.stats?.document_types_distribution || { pdf: 0, docx: 0, txt: 0 };
+      const totalDocs = Object.values(dist).reduce((a, b) => a + b, 0) || 1;
+      
+      const pdfCount = dist.pdf || 0;
+      const docxCount = dist.docx || 0;
+      const txtCount = dist.txt || 0;
+      
+      const pdfPercent = Math.round((pdfCount / totalDocs) * 100);
+      const docxPercent = Math.round((docxCount / totalDocs) * 100);
+      const txtPercent = Math.round((txtCount / totalDocs) * 100);
+
+      container.innerHTML = `
+        <div class="space-y-8 p-6 text-slate-100 max-w-7xl mx-auto">
+          <!-- Title row -->
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-2xl font-bold tracking-tight text-white">System Operations</h2>
+              <p class="text-sm text-slate-400">Overview of database indexing, storage consumption, and client usage telemetry.</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <button onclick="switchView('documents')" class="flex items-center gap-2 rounded-xl bg-slate-800 border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-700 hover:text-white">
+                <i data-lucide="plus-circle" class="h-4 w-4"></i> Upload File
+              </button>
+              <button onclick="switchView('chat')" class="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-600/15 transition hover:bg-blue-500">
+                <i data-lucide="message-square" class="h-4 w-4"></i> Start Chat
+              </button>
+            </div>
+          </div>
+
+          <!-- Cards Grid -->
+          <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            <!-- Doc Card -->
+            <div class="flex items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm transition hover:border-slate-700/80 hover:bg-slate-900">
+              <div class="rounded-xl p-3 border text-blue-400 bg-blue-500/10 border-blue-500/20">
+                <i data-lucide="files" class="h-6 w-6"></i>
+              </div>
+              <div>
+                <span class="text-xs font-semibold text-slate-500 block uppercase tracking-wider">Total Documents</span>
+                <span class="mt-1 text-2xl font-bold text-white block">${state.stats?.total_documents || 0}</span>
+              </div>
+            </div>
+            <!-- Size Card -->
+            <div class="flex items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm transition hover:border-slate-700/80 hover:bg-slate-900">
+              <div class="rounded-xl p-3 border text-purple-400 bg-purple-500/10 border-purple-500/20">
+                <i data-lucide="database" class="h-6 w-6"></i>
+              </div>
+              <div>
+                <span class="text-xs font-semibold text-slate-500 block uppercase tracking-wider">Vector Storage Size</span>
+                <span class="mt-1 text-2xl font-bold text-white block">${formatBytes(state.stats?.total_size_bytes)}</span>
+              </div>
+            </div>
+            <!-- Chat Card -->
+            <div class="flex items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm transition hover:border-slate-700/80 hover:bg-slate-900">
+              <div class="rounded-xl p-3 border text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
+                <i data-lucide="message-square" class="h-6 w-6"></i>
+              </div>
+              <div>
+                <span class="text-xs font-semibold text-slate-500 block uppercase tracking-wider">Chat Sessions</span>
+                <span class="mt-1 text-2xl font-bold text-white block">${state.stats?.total_chats || 0}</span>
+              </div>
+            </div>
+            <!-- Messages Card -->
+            <div class="flex items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm transition hover:border-slate-700/80 hover:bg-slate-900">
+              <div class="rounded-xl p-3 border text-amber-400 bg-amber-500/10 border-amber-500/20">
+                <i data-lucide="messages-square" class="h-6 w-6"></i>
+              </div>
+              <div>
+                <span class="text-xs font-semibold text-slate-500 block uppercase tracking-wider">Total Messages Logs</span>
+                <span class="mt-1 text-2xl font-bold text-white block">${state.stats?.total_messages || 0}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Charts -->
+          <div class="grid gap-6 md:grid-cols-2">
+            <!-- Line Chart SVG -->
+            <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+              <h3 class="text-base font-bold text-white mb-4">Chat Engagement Volume</h3>
+              ${timeline.length <= 1 && timeline[0].count === 0 ? `
+                <div class="flex h-48 items-center justify-center text-xs text-slate-500">No query timeline records found.</div>
+              ` : `
+                <div class="relative h-48 w-full">
+                  <svg viewBox="0 0 ${svgWidth} ${svgHeight}" class="h-full w-full overflow-visible">
+                    <defs>
+                      <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.25" />
+                        <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.0" />
+                      </linearGradient>
+                    </defs>
+                    
+                    <!-- Gridlines -->
+                    <line x1="${padding}" y1="${padding}" x2="${svgWidth - padding}" y2="${padding}" stroke="#1e293b" stroke-width="1" stroke-dasharray="4 4" />
+                    <line x1="${padding}" y1="${svgHeight/2}" x2="${svgWidth - padding}" y2="${svgHeight/2}" stroke="#1e293b" stroke-width="1" stroke-dasharray="4 4" />
+                    <line x1="${padding}" y1="${svgHeight - padding}" x2="${svgWidth - padding}" y2="${svgHeight - padding}" stroke="#1e293b" stroke-width="1" stroke-dasharray="4 4" />
+
+                    <!-- Paths -->
+                    <path d="${areaPath}" fill="url(#areaGrad)" />
+                    <path d="${linePath}" fill="none" stroke="#3b82f6" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+
+                    <!-- Dots -->
+                    ${points.map((p) => `
+                      <circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#1e1b4b" stroke="#3b82f6" stroke-width="2.5" class="hover:r-6 cursor-pointer" />
+                    `).join('')}
+
+                    <!-- Axis -->
+                    <text x="${padding}" y="${svgHeight - 8}" fill="#64748b" font-size="9.5">${points[0]?.date.split('-').slice(1).join('/') || ''}</text>
+                    <text x="${svgWidth - padding}" y="${svgHeight - 8}" text-anchor="end" fill="#64748b" font-size="9.5">${points[points.length-1]?.date.split('-').slice(1).join('/') || ''}</text>
+                  </svg>
+                </div>
+              `}
+            </div>
+
+            <!-- Horizontal Bars -->
+            <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+              <h3 class="text-base font-bold text-white mb-5">Indexed File Formats</h3>
+              <div class="space-y-4">
+                <!-- PDF -->
+                <div class="space-y-1.5">
+                  <div class="flex items-center justify-between text-sm">
+                    <div class="flex items-center gap-2 text-slate-300 font-medium">
+                      <i data-lucide="file-text" class="h-4.5 w-4.5 text-red-400"></i>
+                      <span>PDF Documents</span>
+                    </div>
+                    <span class="text-slate-400 font-semibold">${pdfCount} files (${pdfPercent}%)</span>
+                  </div>
+                  <div class="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                    <div class="h-full rounded-full bg-red-500 transition-all" style="width: ${pdfPercent}%"></div>
+                  </div>
+                </div>
+                <!-- DOCX -->
+                <div class="space-y-1.5">
+                  <div class="flex items-center justify-between text-sm">
+                    <div class="flex items-center gap-2 text-slate-300 font-medium">
+                      <i data-lucide="file-text" class="h-4.5 w-4.5 text-blue-400"></i>
+                      <span>Word Documents</span>
+                    </div>
+                    <span class="text-slate-400 font-semibold">${docxCount} files (${docxPercent}%)</span>
+                  </div>
+                  <div class="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                    <div class="h-full rounded-full bg-blue-500 transition-all" style="width: ${docxPercent}%"></div>
+                  </div>
+                </div>
+                <!-- TXT -->
+                <div class="space-y-1.5">
+                  <div class="flex items-center justify-between text-sm">
+                    <div class="flex items-center gap-2 text-slate-300 font-medium">
+                      <i data-lucide="file-code" class="h-4.5 w-4.5 text-emerald-400"></i>
+                      <span>Plain Text</span>
+                    </div>
+                    <span class="text-slate-400 font-semibold">${txtCount} files (${txtPercent}%)</span>
+                  </div>
+                  <div class="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                    <div class="h-full rounded-full bg-emerald-500 transition-all" style="width: ${txtPercent}%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Grid: Recent Documents -->
+          <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+            <div class="flex items-center justify-between border-b border-slate-850 pb-4 mb-4">
+              <h3 class="text-base font-bold text-white">Recently Indexed Documents</h3>
+              <button onclick="switchView('documents')" class="flex items-center gap-1.5 text-sm font-semibold text-blue-500 hover:text-blue-400 transition">
+                Manage Files <i data-lucide="arrow-right" class="h-4 w-4"></i>
+              </button>
+            </div>
+
+            ${state.recentDocs.length === 0 ? `
+              <div class="flex flex-col items-center justify-center text-center py-8">
+                <p class="text-sm text-slate-500">No documents uploaded yet.</p>
+              </div>
+            ` : `
+              <div class="divide-y divide-slate-850">
+                ${state.recentDocs.map((doc) => `
+                  <div class="flex items-center justify-between py-3.5 first:pt-0 last:pb-0">
+                    <div class="flex items-center gap-3">
+                      <div class="rounded-lg bg-slate-800 p-2 border border-slate-700 text-slate-300">
+                        <i data-lucide="file-text" class="h-5 w-5 text-blue-400"></i>
+                      </div>
+                      <div>
+                        <span class="text-sm font-semibold text-slate-200 block">${doc.filename}</span>
+                        <span class="text-xs text-slate-500 block uppercase font-medium">
+                          ${doc.file_type} • ${formatBytes(doc.file_size)} • Chunks: ${doc.chunk_count}
+                        </span>
+                      </div>
+                    </div>
+                    <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider ${
+                      doc.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 
+                      doc.status === 'failed' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 animate-pulse'
+                    }">
+                      ${doc.status}
+                    </span>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+    };
+
+    // 6. Render Documents View
+    const renderDocuments = () => {
+      updateNavStyles('nav-documents', 'Document Management');
+      
+      const container = document.getElementById('view-content');
+      
+      container.innerHTML = `
+        <div class="space-y-8 p-6 text-slate-100 max-w-7xl mx-auto">
+          <div>
+            <h2 class="text-2xl font-bold tracking-tight text-white">Document Management</h2>
+            <p class="text-sm text-slate-400">Upload and index PDF, DOCX, or TXT documents. Once processed, they become searchable in the chat page.</p>
+          </div>
+
+          <!-- Upload Container -->
+          <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+            <h3 class="text-base font-bold text-white mb-4">Index New Document</h3>
+            
+            <div id="drop-zone" class="flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-800 bg-slate-900/40 p-6 text-center hover:border-slate-700 hover:bg-slate-900/60 transition-all">
+              <input type="file" id="doc-file-input" class="hidden" accept=".pdf,.docx,.doc,.txt">
+              
+              <div id="upload-idle" class="flex flex-col items-center">
+                <div class="mb-4 rounded-xl bg-slate-800 p-3 text-blue-400 border border-slate-700">
+                  <i data-lucide="upload-cloud" class="h-7 w-7"></i>
+                </div>
+                <p class="text-sm font-semibold text-slate-200">Drag & Drop file or <span class="text-blue-500">browse</span></p>
+                <p class="mt-1.5 text-xs text-slate-500">PDF, DOCX, or TXT (Max 15MB)</p>
+              </div>
+
+              <div id="upload-status" class="hidden flex flex-col items-center">
+                <!-- Inner status HTML injected during upload -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Documents Table -->
+          <div class="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+            <div class="p-6 border-b border-slate-850 flex items-center justify-between bg-slate-900/20">
+              <h3 class="text-base font-bold text-white">Indexed Repositories</h3>
+              <span class="text-xs text-slate-400 font-semibold uppercase">${state.documents.length} files total</span>
+            </div>
+
+            ${state.documents.length === 0 ? `
+              <div class="flex flex-col items-center justify-center text-center p-12">
+                <i data-lucide="hard-drive" class="h-12 w-12 text-slate-700 mb-3"></i>
+                <p class="text-sm text-slate-500">No documents found. Drag & drop files above to parse them.</p>
+              </div>
+            ` : `
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="border-b border-slate-850 bg-slate-900/40 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                      <th class="p-4 pl-6">Filename</th>
+                      <th class="p-4">Size</th>
+                      <th className="p-4">Chunks</th>
+                      <th class="p-4">Indexed On</th>
+                      <th class="p-4">Status</th>
+                      <th class="p-4 pr-6 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-850 text-sm text-slate-350">
+                    ${state.documents.map((doc) => `
+                      <tr class="hover:bg-slate-900/40 transition">
+                        <td class="p-4 pl-6 font-medium text-slate-200">
+                          <div class="flex items-center gap-3">
+                            <i data-lucide="file-text" class="h-5 w-5 text-blue-400 shrink-0"></i>
+                            <span class="truncate max-w-xs" title="${doc.filename}">${doc.filename}</span>
+                          </div>
+                        </td>
+                        <td class="p-4 text-slate-400">${formatBytes(doc.file_size)}</td>
+                        <td class="p-4 text-slate-400 font-bold">${doc.chunk_count}</td>
+                        <td class="p-4 text-slate-400">
+                          <span class="flex items-center gap-1.5">
+                            <i data-lucide="calendar" class="h-3.5 w-3.5 text-slate-500"></i>
+                            ${new Date(doc.upload_date).toLocaleDateString()}
+                          </span>
+                        </td>
+                        <td class="p-4">
+                          <span class="inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider ${
+                            doc.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 
+                            doc.status === 'failed' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 animate-pulse'
+                          }">
+                            ${doc.status}
+                          </span>
+                        </td>
+                        <td class="p-4 pr-6 text-right space-x-1.5">
+                          <a href="/api/documents/${doc.id}/download" download class="inline-flex rounded-lg border border-slate-800 bg-slate-900 p-2 text-slate-400 hover:text-white hover:bg-slate-800 transition" title="Download Document">
+                            <i data-lucide="download" class="h-4.5 w-4.5"></i>
+                          </a>
+                          <button onclick="handleDeleteDoc(${doc.id})" class="inline-flex rounded-lg border border-slate-800 bg-slate-900 p-2 text-slate-400 hover:text-red-400 hover:bg-red-950/20 hover:border-red-900/30 transition" title="Delete Document">
+                            <i data-lucide="trash-2" class="h-4.5 w-4.5"></i>
+                          </button>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+
+      // Hook up Upload DOM Events
+      const dropZone = document.getElementById('drop-zone');
+      const fileInput = document.getElementById('doc-file-input');
+
+      dropZone.addEventListener('click', () => fileInput.click());
+      
+      // Drag/Drop Listeners
+      ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          dropZone.className = "flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-blue-500 bg-blue-950/20 p-6 text-center transition-all";
+        }, false);
+      });
+
+      ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          dropZone.className = "flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-800 bg-slate-900/40 p-6 text-center hover:border-slate-700 hover:bg-slate-900/60 transition-all";
+        }, false);
+      });
+
+      dropZone.addEventListener('drop', async (e) => {
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+          await uploadFile(e.dataTransfer.files[0]);
+        }
+      });
+
+      fileInput.addEventListener('change', async (e) => {
+        if (e.target.files && e.target.files[0]) {
+          await uploadFile(e.target.files[0]);
+        }
+      });
+    };
+
+    // Trigger Doc Upload API
+    const uploadFile = async (file) => {
+      const idleDiv = document.getElementById('upload-idle');
+      const statusDiv = document.getElementById('upload-status');
+      const dropZone = document.getElementById('drop-zone');
+
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (!['pdf', 'docx', 'doc', 'txt'].includes(ext)) {
+        alert("Unsupported file format! Please upload PDF, DOCX, or TXT.");
+        return;
+      }
+
+      idleDiv.classList.add('hidden');
+      statusDiv.classList.remove('hidden');
+      dropZone.className = "flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-yellow-500/50 bg-yellow-950/5 p-6 text-center transition-all";
+      
+      statusDiv.innerHTML = `
+        <i data-lucide="loader" class="h-10 w-10 text-yellow-500 animate-spin mb-4"></i>
+        <p class="text-sm font-semibold text-slate-200">Uploading & Indexing...</p>
+        <p class="mt-1 text-xs text-slate-400">${file.name} (${(file.size/1024).toFixed(0)} KB)</p>
+        <p class="mt-2 text-xs text-slate-500 italic">Splitting text, calculating cosine hashing models...</p>
+      `;
+      lucide.createIcons();
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('/api/documents/upload', {
+          method: 'POST',
+          headers: getHeaders(true),
+          body: formData
+        });
+
+        if (res.ok) {
+          dropZone.className = "flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-emerald-500/50 bg-emerald-950/5 p-6 text-center transition-all";
+          statusDiv.innerHTML = `
+            <i data-lucide="check-circle-2" class="h-10 w-10 text-emerald-500 mb-4 animate-bounce"></i>
+            <p class="text-sm font-semibold text-slate-250">Document Processed successfully!</p>
+          `;
+          lucide.createIcons();
+          setTimeout(() => {
+            switchView('documents');
+          }, 2000);
+        } else {
+          const err = await res.json();
+          throw new Error(err.detail || 'File indexing failed.');
+        }
+      } catch (err) {
+        dropZone.className = "flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-red-500/50 bg-red-950/5 p-6 text-center transition-all";
+        statusDiv.innerHTML = `
+          <i data-lucide="x-circle" class="h-10 w-10 text-red-500 mb-4"></i>
+          <p class="text-sm font-semibold text-slate-200">Processing Failed</p>
+          <p class="mt-1 text-xs text-red-400 max-w-sm">${err.message}</p>
+          <button onclick="switchView('documents')" class="mt-4 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-350 hover:bg-slate-700">Dismiss</button>
+        `;
+        lucide.createIcons();
+      }
+    };
+
+    // Trigger Doc Delete API
+    const handleDeleteDoc = async (id) => {
+      if (!confirm("Are you sure you want to delete this document? associated vector embeddings will be lost.")) return;
+      try {
+        const res = await fetch(`/api/documents/${id}`, {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        if (res.ok) {
+          await loadViewData('documents');
+        } else {
+          alert("Failed to delete document.");
+        }
+      } catch (err) {
+        alert("Deletion network error.");
+      }
+    };
+
+    // 7. Render Chat View
+    const renderChat = () => {
+      updateNavStyles('nav-chat', 'Interactive RAG Chat');
+      
+      const container = document.getElementById('view-content');
+      
+      container.innerHTML = `
+        <div class="flex h-[calc(100vh-4rem)] text-slate-100 overflow-hidden">
+          
+          <!-- Chat threads list -->
+          <div class="hidden w-72 flex-col border-r border-slate-800 bg-slate-950 sm:flex shrink-0">
+            <div class="p-4">
+              <button onclick="handleCreateChatSession()" class="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600/10 border border-blue-500/20 px-4 py-2.5 text-sm font-semibold text-blue-400 hover:bg-blue-600 hover:text-white transition">
+                <i data-lucide="plus" class="h-4.5 w-4.5"></i> New Chat Thread
+              </button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto px-2 space-y-1.5">
+              ${state.sessions.length === 0 ? `
+                <div class="p-4 text-center text-xs text-slate-600">No chat threads. Click New Chat.</div>
+              ` : state.sessions.map((sess) => `
+                <div onclick="selectChatSession(${sess.id})" class="group flex items-center justify-between gap-2 rounded-xl px-3.5 py-3 cursor-pointer transition ${
+                  sess.id === state.activeSessionId ? 'bg-slate-900 border border-slate-850 text-white' : 'text-slate-400 hover:bg-slate-900/40 hover:text-slate-200'
+                }">
+                  <div class="flex items-center gap-2.5 truncate">
+                    <i data-lucide="message-square" class="h-4.5 w-4.5 shrink-0 ${sess.id === state.activeSessionId ? 'text-blue-500' : 'text-slate-500'}"></i>
+                    <span class="text-sm font-medium truncate">${sess.title}</span>
+                  </div>
+                  <button onclick="handleDeleteChatSession(${sess.id}, event)" class="opacity-0 group-hover:opacity-100 rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-red-400 transition">
+                    <i data-lucide="trash-2" class="h-4 w-4"></i>
+                  </button>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Chat Window Box -->
+          <div class="flex flex-1 flex-col bg-slate-950/20 overflow-hidden relative">
+            ${state.activeSessionId ? `
+              <!-- Message Bubble Stream -->
+              <div id="message-container" class="flex-1 overflow-y-auto bg-slate-900/40 p-6 space-y-6">
+                ${state.messages.length === 0 ? `
+                  <div class="flex h-full flex-col items-center justify-center text-center">
+                    <i data-lucide="bot" class="h-16 w-16 text-blue-500 mb-4 animate-bounce"></i>
+                    <h3 class="text-lg font-semibold text-white">Ask your RAG Assistant</h3>
+                    <p class="mt-2 max-w-sm text-sm text-slate-400">
+                      Specify query filters or type below to search through indexed contexts.
+                    </p>
+                  </div>
+                ` : state.messages.map((msg, index) => {
+                  const isUser = msg.role === 'user';
+                  const isLastAssistant = !isUser && index === state.messages.length - 1;
+                  return `
+                    <div class="flex w-full gap-4 ${isUser ? 'justify-end' : 'justify-start'}">
+                      ${!isUser ? `
+                        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400">
+                          <i data-lucide="bot" class="h-5 w-5"></i>
+                        </div>
+                      ` : ''}
+                      
+                      <div class="max-w-[75%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${
+                        isUser ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-slate-800 text-slate-100 border border-slate-700 rounded-tl-none'
+                      }">
+                        <p class="whitespace-pre-wrap">${msg.content}</p>
+
+                        <!-- Sources mapping -->
+                        ${isLastAssistant && state.sources && state.sources.length > 0 ? `
+                          <div class="mt-4 border-t border-slate-700/50 pt-3">
+                            <span class="text-xs font-semibold text-slate-400 block mb-2">Retrieved Context Citations:</span>
+                            <div class="grid gap-2 sm:grid-cols-2">
+                              ${state.sources.map((src) => `
+                                <div class="rounded-lg bg-slate-900/60 p-2.5 border border-slate-700/40 text-xs hover:bg-slate-900 transition">
+                                  <div class="flex items-center justify-between gap-2 font-medium text-slate-350">
+                                    <span class="flex items-center gap-1 truncate">
+                                      <i data-lucide="file-text" class="h-3 w-3 text-blue-400"></i>
+                                      <span class="truncate">${src.document_name}</span>
+                                    </span>
+                                    <span class="text-emerald-450">${(src.score*100).toFixed(0)}% Match</span>
+                                  </div>
+                                  <p class="mt-1 text-slate-400 line-clamp-2 italic">"${src.content}"</p>
+                                </div>
+                              `).join('')}
+                            </div>
+                          </div>
+                        ` : ''}
+                      </div>
+
+                      ${isUser ? `
+                        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-800 border border-slate-700 text-slate-300">
+                          <i data-lucide="user" class="h-5 w-5"></i>
+                        </div>
+                      ` : ''}
+                    </div>
+                  `;
+                }).join('')}
+
+                <!-- Typing loader -->
+                <div id="chat-typing-loader" class="hidden flex w-full gap-4 justify-start">
+                  <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400">
+                    <i data-lucide="bot" class="h-5 w-5"></i>
+                  </div>
+                  <div class="bg-slate-800 text-slate-300 border border-slate-700 rounded-2xl rounded-tl-none px-5 py-4 text-sm flex items-center gap-3">
+                    <div class="flex space-x-1.5">
+                      <div class="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.3s]"></div>
+                      <div class="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.15s]"></div>
+                      <div class="h-2 w-2 animate-bounce rounded-full bg-slate-400"></div>
+                    </div>
+                    <span class="text-xs text-slate-500">Searching indices...</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Input bar -->
+              <div class="border-t border-slate-800 bg-slate-950 p-4">
+                <form id="chat-input-form" class="mx-auto max-w-4xl space-y-3">
+                  <!-- Document Select Filters -->
+                  <div id="filter-bar" class="hidden rounded-xl bg-slate-900 border border-slate-850 p-3.5 space-y-2">
+                    <span class="text-xs font-semibold text-slate-400 block">Search Target Filter: (Only search checked docs)</span>
+                    <div class="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
+                      ${state.documents.map((d) => `
+                        <button type="button" onclick="toggleDocFilter(${d.id})" id="filter-btn-${d.id}" class="rounded-full px-3 py-1 text-xs font-medium border border-slate-700 bg-slate-800 text-slate-400 hover:text-slate-200">
+                          ${d.filename}
+                        </button>
+                      `).join('')}
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    ${state.documents.length > 0 ? `
+                      <button type="button" onclick="toggleFilterBar()" id="filter-toggle-btn" class="rounded-xl p-3 border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200">
+                        <i data-lucide="filter" class="h-5 w-5"></i>
+                      </button>
+                    ` : ''}
+                    <input type="text" id="chat-input-text" required class="flex-1 rounded-xl border border-slate-800 bg-slate-900 px-4 py-3.5 text-sm text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none" placeholder="Ask a question about your files...">
+                    <button type="submit" class="rounded-xl bg-blue-600 p-3.5 text-white hover:bg-blue-500 transition">
+                      <i data-lucide="send" class="h-5 w-5"></i>
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ` : `
+              <!-- Empty state select session -->
+              <div class="flex flex-1 flex-col items-center justify-center text-center p-6">
+                <i data-lucide="bot" class="h-16 w-16 text-slate-600 mb-4"></i>
+                <h3 class="text-lg font-bold text-white">Select a Chat Session</h3>
+                <p class="mt-1 text-sm text-slate-500 max-w-xs">Pick an existing session from the history or start a new thread to query documents.</p>
+                <button onclick="handleCreateChatSession()" class="mt-4 flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 transition">
+                  Start New Session <i data-lucide="arrow-right" class="h-4 w-4"></i>
+                </button>
+              </div>
+            `}
+          </div>
+
+        </div>
+      `;
+      lucide.createIcons();
+      
+      const msgBox = document.getElementById('message-container');
+      if (msgBox) {
+        msgBox.scrollTop = msgBox.scrollHeight;
+      }
+
+      // Bind input events
+      const form = document.getElementById('chat-input-form');
+      if (form) {
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const input = document.getElementById('chat-input-text');
+          const query = input.value;
+          if (!query.trim()) return;
+
+          input.value = '';
+          
+          // Render local user message
+          appendUserMessage(query);
+          
+          // Call query API
+          await submitRAGQuery(query);
+        });
+      }
+    };
+
+    // Select Chat Session
+    const selectChatSession = async (id) => {
+      state.activeSessionId = id;
+      state.messages = [];
+      state.sources = [];
+      
+      renderChat();
+
+      try {
+        const res = await fetch(`/api/chat/sessions/${id}/messages`, { headers: getHeaders() });
+        if (res.ok) {
+          state.messages = await res.json();
+          renderChat();
+        }
+      } catch (err) {
+        console.error("Messages check failed", err);
+      }
+    };
+
+    // Create Chat Session
+    const handleCreateChatSession = async () => {
+      try {
+        const res = await fetch('/api/chat/sessions', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ title: 'New Chat' })
+        });
+        if (res.ok) {
+          const newSess = await res.json();
+          state.sessions.unshift(newSess);
+          await selectChatSession(newSess.id);
+        }
+      } catch (err) {
+        alert("Failed to create new chat session.");
+      }
+    };
+
+    // Delete Chat Session
+    const handleDeleteChatSession = async (id, e) => {
+      e.stopPropagation();
+      try {
+        const res = await fetch(`/api/chat/sessions/${id}`, {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        if (res.ok) {
+          state.sessions = state.sessions.filter(s => s.id !== id);
+          if (state.activeSessionId === id) {
+            state.activeSessionId = null;
+            state.messages = [];
+            state.sources = [];
+          }
+          renderChat();
+        }
+      } catch (err) {
+        alert("Failed to delete chat session.");
+      }
+    };
+
+    // Render client message immediately
+    const appendUserMessage = (text) => {
+      const stream = document.getElementById('message-container');
+      const typing = document.getElementById('chat-typing-loader');
+      
+      const userBubble = document.createElement('div');
+      userBubble.className = "flex w-full gap-4 justify-end";
+      userBubble.innerHTML = `
+        <div class="max-w-[75%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed bg-blue-600 text-white rounded-tr-none">
+          <p class="whitespace-pre-wrap">${text}</p>
+        </div>
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-800 border border-slate-700 text-slate-300">
+          <i data-lucide="user" class="h-5 w-5"></i>
+        </div>
+      `;
+      
+      stream.insertBefore(userBubble, typing);
+      typing.classList.remove('hidden');
+      stream.scrollTop = stream.scrollHeight;
+      lucide.createIcons();
+    };
+
+    // Submit Query endpoint
+    const submitRAGQuery = async (queryText) => {
+      const typing = document.getElementById('chat-typing-loader');
+      
+      try {
+        const filterIds = state.selectedDocFilters.length > 0 ? state.selectedDocFilters : null;
+        
+        const res = await fetch(`/api/chat/sessions/${state.activeSessionId}/query`, {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ content: queryText, title: '', document_ids: filterIds })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          
+          // Re-load the session messages to get sources linked perfectly
+          const msgsRes = await fetch(`/api/chat/sessions/${state.activeSessionId}/messages`, { headers: getHeaders() });
+          state.messages = msgsRes.ok ? await msgsRes.json() : [];
+          state.sources = data.sources;
+          
+          // Check if session name updated from New Chat
+          const activeSessObj = state.sessions.find(s => s.id === state.activeSessionId);
+          if (activeSessObj && activeSessObj.title === 'New Chat') {
+            activeSessObj.title = queryText.slice(0, 30);
+          }
+
+          renderChat();
+        } else {
+          throw new Error("Chat query failed.");
+        }
+      } catch (err) {
+        typing.classList.add('hidden');
+        alert("Semantic indexing query error. Verify API key status.");
+      }
+    };
+
+    // Filter toggling
+    const toggleFilterBar = () => {
+      const bar = document.getElementById('filter-bar');
+      bar.classList.toggle('hidden');
+    };
+
+    const toggleDocFilter = (id) => {
+      const idx = state.selectedDocFilters.indexOf(id);
+      const btn = document.getElementById(`filter-btn-${id}`);
+      
+      if (idx > -1) {
+        state.selectedDocFilters.splice(idx, 1);
+        btn.className = "rounded-full px-3 py-1 text-xs font-medium border border-slate-700 bg-slate-800 text-slate-400 hover:text-slate-205";
+      } else {
+        state.selectedDocFilters.push(id);
+        btn.className = "rounded-full px-3 py-1 text-xs font-medium border border-blue-500 bg-blue-600/25 text-blue-400";
+      }
+    };
+
+    // 8. Render Settings View
+    const renderSettings = () => {
+      updateNavStyles('nav-settings', 'System Configurations');
+      
+      const container = document.getElementById('view-content');
+      
+      container.innerHTML = `
+        <div class="space-y-8 p-6 text-slate-100 max-w-4xl mx-auto">
+          <div>
+            <h2 class="text-2xl font-bold tracking-tight text-white">System Settings</h2>
+            <p class="text-sm text-slate-400">Manage your personal profile, credentials, and configure neural API keys.</p>
+          </div>
+
+          <!-- Profile -->
+          <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 space-y-4">
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <i data-lucide="user" class="h-5 w-5 text-blue-400"></i> User Profile Information
+            </h3>
+            <div class="grid gap-4 sm:grid-cols-2 text-sm">
+              <div class="rounded-xl bg-slate-900 border border-slate-850 p-4">
+                <span class="text-xs font-semibold text-slate-500 uppercase block mb-1">Username</span>
+                <span class="font-semibold text-white">${state.user?.username || 'Username'}</span>
+              </div>
+              <div class="rounded-xl bg-slate-900 border border-slate-850 p-4">
+                <span class="text-xs font-semibold text-slate-500 uppercase block mb-1">Email Address</span>
+                <span class="font-semibold text-white">${state.user?.email || 'Email'}</span>
+              </div>
+              <div class="rounded-xl bg-slate-900 border border-slate-850 p-4 sm:col-span-2">
+                <span class="text-xs font-semibold text-slate-500 uppercase block mb-1">Account Creation Date</span>
+                <span class="text-slate-300">${state.user?.created_at ? new Date(state.user.created_at).toLocaleString() : 'N/A'}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- RAG Setup -->
+          <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 space-y-4">
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <i data-lucide="key-round" class="h-5 w-5 text-blue-400"></i> RAG AI Keys Setup
+            </h3>
+            <p class="text-sm text-slate-400">The RAG assistant operates locally using a sentence hashing vectorizer. To enable true semantic summaries, add your developer API keys in the backend environment file.</p>
+            
+            <div class="rounded-xl bg-slate-900 border border-slate-850 p-5 space-y-3.5 text-sm">
+              <span class="text-xs font-bold text-blue-400 uppercase tracking-wider block">Instructions:</span>
+              <p class="text-slate-350">
+                1. Open the project root folder.<br>
+                2. Edit the <code class="rounded bg-slate-850 px-1.5 py-0.5 text-amber-400 font-mono">.env</code> file.<br>
+                3. Add your key parameters:
+              </p>
+              <pre class="rounded-xl bg-slate-950 p-4 text-xs font-mono text-slate-400 border border-slate-900 overflow-x-auto leading-5">
+GEMINI_API_KEY=AIzaSy...<br>
+OPENAI_API_KEY=sk-proj-...
+              </pre>
+            </div>
+          </div>
+
+          <!-- Operational Status -->
+          <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 space-y-4">
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <i data-lucide="server" class="h-5 w-5 text-blue-400"></i> Operational Status
+            </h3>
+            <div class="grid gap-3.5 sm:grid-cols-3 text-sm">
+              <div class="flex items-center gap-3 rounded-xl bg-slate-900 border border-slate-850 p-4">
+                <i data-lucide="database" class="h-5 w-5 text-emerald-400"></i>
+                <div>
+                  <span class="text-xs text-slate-500 uppercase block">Database Status</span>
+                  <span class="font-semibold text-emerald-400">CONNECTED</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 rounded-xl bg-slate-900 border border-slate-850 p-4">
+                <i data-lucide="shield-check" class="h-5 w-5 text-emerald-400"></i>
+                <div>
+                  <span class="text-xs text-slate-500 uppercase block">Security Context</span>
+                  <span class="font-semibold text-emerald-400">JWT SIGNED</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 rounded-xl bg-slate-900 border border-slate-850 p-4">
+                <i data-lucide="server" class="h-5 w-5 text-emerald-400"></i>
+                <div>
+                  <span class="text-xs text-slate-500 uppercase block">Service API</span>
+                  <span class="font-semibold text-emerald-400">ONLINE</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+    };
+
+    // Styling helpers
+    const updateNavStyles = (activeId, title) => {
+      document.getElementById('view-title').innerText = title;
+      
+      const navIds = ['nav-dashboard', 'nav-chat', 'nav-documents', 'nav-settings'];
+      navIds.forEach((id) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        if (id === activeId) {
+          btn.className = "flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-sm font-medium transition-all bg-blue-600 text-white shadow-lg shadow-blue-600/25";
+        } else {
+          btn.className = "flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-sm font-medium transition-all text-slate-400 hover:bg-slate-900 hover:text-slate-100";
+        }
+      });
+    };
+
+    // Run Initialization on DOM load
+    window.addEventListener('DOMContentLoaded', initApp);
+  </script>
+</body>
+</html>
