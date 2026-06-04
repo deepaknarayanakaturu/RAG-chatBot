@@ -10,7 +10,9 @@ class Settings:
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     
     # Upload directories
-    UPLOAD_DIR: str = os.path.join(os.getcwd(), "backend", "uploads")
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+
+    UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
     PDF_DIR: str = os.path.join(UPLOAD_DIR, "pdfs")
     DOCX_DIR: str = os.path.join(UPLOAD_DIR, "docx")
     TXT_DIR: str = os.path.join(UPLOAD_DIR, "txt")
