@@ -38,16 +38,21 @@ def process_document(db: Session, filename: str, temp_file_path: str, user_id: i
         target_filepath = os.path.join(target_dir, filename)
         counter += 1
 
-    # 3. Copy to destination
+    # 3. Copy to destination (for local text extraction)
     shutil.copy(temp_file_path, target_filepath)
     file_size = os.path.getsize(target_filepath)
 
-    # 4. Create document row in database as processing
+    # 4. Read the raw file bytes for database storage (Render persistence)
+    with open(target_filepath, "rb") as f:
+        file_bytes = f.read()
+
+    # 5. Create document row in database as processing
     db_doc = Document(
         filename=filename,
         filepath=target_filepath,
         file_type=file_type,
         file_size=file_size,
+        file_data=file_bytes,  # Store raw bytes in DB for Render deployment
         user_id=user_id,
         status="processing",
         chunk_count=0
@@ -57,17 +62,17 @@ def process_document(db: Session, filename: str, temp_file_path: str, user_id: i
     db.refresh(db_doc)
 
     try:
-        # 5. Extract text
+        # 6. Extract text
         text = loader(target_filepath)
         if not text.strip():
             raise ValueError("No text content could be extracted from the file.")
 
-        # 6. Chunk text
+        # 7. Chunk text
         chunks = split_text(text)
         if not chunks:
             raise ValueError("Text content was too short or failed to chunk.")
 
-        # 7. Generate embeddings and save chunks
+        # 8. Generate embeddings and save chunks
         db_doc.chunk_count = len(chunks)
         db.commit()
 
@@ -81,7 +86,7 @@ def process_document(db: Session, filename: str, temp_file_path: str, user_id: i
             )
             db.add(db_chunk)
         
-        # 8. Complete process
+        # 9. Complete process
         db_doc.status = "completed"
         db.commit()
         db.refresh(db_doc)
@@ -109,8 +114,8 @@ def delete_document(db: Session, document_id: int, user_id: int) -> bool:
     db.delete(db_doc)
     db.commit()
     
-    # Delete physical file
-    if os.path.exists(db_doc.filepath):
+    # Delete physical file if it exists (may not on Render after redeploy)
+    if db_doc.filepath and os.path.exists(db_doc.filepath):
         try:
             os.remove(db_doc.filepath)
         except Exception:

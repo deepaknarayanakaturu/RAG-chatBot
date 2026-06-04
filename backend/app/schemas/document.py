@@ -5,7 +5,7 @@ from typing import Optional
 class DocumentResponse(BaseModel):
     id: int
     filename: str
-    filepath: str
+    filepath: Optional[str] = None
     file_type: str
     file_size: int
     upload_date: datetime
@@ -15,3 +15,4 @@ class DocumentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+

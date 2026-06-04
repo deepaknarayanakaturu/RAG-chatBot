@@ -1,7 +1,7 @@
 import os
 import tempfile
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 from typing import List
 from app.database.db import get_db
@@ -88,15 +88,25 @@ def download_file(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found or access denied."
         )
-        
-    if not os.path.exists(db_doc.filepath):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Physical file not found on server."
+    
+    # Try serving from disk first (fastest)
+    if db_doc.filepath and os.path.exists(db_doc.filepath):
+        return FileResponse(
+            path=db_doc.filepath,
+            filename=db_doc.filename,
+            media_type="application/octet-stream"
         )
-        
-    return FileResponse(
-        path=db_doc.filepath,
-        filename=db_doc.filename,
-        media_type="application/octet-stream"
+    
+    # Fallback: serve from database bytes (works after Render redeploy)
+    if db_doc.file_data:
+        return Response(
+            content=db_doc.file_data,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{db_doc.filename}"'}
+        )
+    
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="File data not available. The file may have been uploaded before database storage was enabled."
     )
+

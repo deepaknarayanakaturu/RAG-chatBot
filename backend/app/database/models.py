@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON, LargeBinary
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database.db import Base
@@ -22,9 +22,10 @@ class Document(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     filename = Column(String, nullable=False)
-    filepath = Column(String, nullable=False)
+    filepath = Column(String, nullable=True)  # Optional — ephemeral on Render
     file_type = Column(String, nullable=False)
     file_size = Column(Integer, nullable=False)
+    file_data = Column(LargeBinary, nullable=True)  # Raw file bytes stored in DB for persistence
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     upload_date = Column(DateTime, default=datetime.utcnow)
     status = Column(String, default="processing")  # processing, completed, failed
