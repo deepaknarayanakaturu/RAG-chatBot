@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Settings:
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://deepaknarayana:bXbDLaBWwT7PdXcxujmQhCo2dfscIM3o@dpg-d8gj3lmq1p3s739l9t1g-a/smart_rag")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:y23cm076@localhost/smart_rag")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "mysupersecretkey")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
