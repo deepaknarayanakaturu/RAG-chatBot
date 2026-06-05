@@ -3,7 +3,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from app.config.settings import settings
 
-engine = create_engine(settings.DATABASE_URL)
+# Render provides DATABASE_URL with 'postgres://' scheme,
+# but SQLAlchemy 2.x requires 'postgresql://'.
+database_url = settings.DATABASE_URL
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(database_url)
 
 SessionLocal = sessionmaker(
     autocommit=False,

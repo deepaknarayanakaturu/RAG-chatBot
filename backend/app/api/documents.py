@@ -8,7 +8,7 @@ from app.database.db import get_db
 from app.database.models import User, Document
 from app.schemas.document import DocumentResponse
 from app.api.auth import get_current_user
-from app.services.document_service import process_document, delete_document
+from app.services.document_service import process_document, delete_document, resolve_filepath
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
@@ -88,15 +88,18 @@ def download_file(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found or access denied."
         )
-        
-    if not os.path.exists(db_doc.filepath):
+    
+    # Resolve stored relative path to absolute
+    actual_path = resolve_filepath(db_doc.filepath)
+    
+    if not os.path.exists(actual_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Physical file not found on server."
         )
         
     return FileResponse(
-        path=db_doc.filepath,
+        path=actual_path,
         filename=db_doc.filename,
         media_type="application/octet-stream"
     )

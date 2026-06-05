@@ -42,10 +42,13 @@ def process_document(db: Session, filename: str, temp_file_path: str, user_id: i
     shutil.copy(temp_file_path, target_filepath)
     file_size = os.path.getsize(target_filepath)
 
-    # 4. Create document row in database as processing
+    # 4. Store RELATIVE path from BASE_DIR (cross-platform, survives deploys)
+    relative_path = os.path.relpath(target_filepath, settings.BASE_DIR)
+
+    # 5. Create document row in database as processing
     db_doc = Document(
         filename=filename,
-        filepath=target_filepath,
+        filepath=relative_path,
         file_type=file_type,
         file_size=file_size,
         user_id=user_id,
@@ -57,17 +60,17 @@ def process_document(db: Session, filename: str, temp_file_path: str, user_id: i
     db.refresh(db_doc)
 
     try:
-        # 5. Extract text
+        # 6. Extract text
         text = loader(target_filepath)
         if not text.strip():
             raise ValueError("No text content could be extracted from the file.")
 
-        # 6. Chunk text
+        # 7. Chunk text
         chunks = split_text(text)
         if not chunks:
             raise ValueError("Text content was too short or failed to chunk.")
 
-        # 7. Generate embeddings and save chunks
+        # 8. Generate embeddings and save chunks
         db_doc.chunk_count = len(chunks)
         db.commit()
 
@@ -81,7 +84,7 @@ def process_document(db: Session, filename: str, temp_file_path: str, user_id: i
             )
             db.add(db_chunk)
         
-        # 8. Complete process
+        # 9. Complete process
         db_doc.status = "completed"
         db.commit()
         db.refresh(db_doc)
@@ -100,19 +103,28 @@ def process_document(db: Session, filename: str, temp_file_path: str, user_id: i
     return db_doc
 
 
+def resolve_filepath(relative_path: str) -> str:
+    """Resolve a stored relative path to an absolute path."""
+    abs_path = os.path.join(settings.BASE_DIR, relative_path)
+    return os.path.normpath(abs_path)
+
+
 def delete_document(db: Session, document_id: int, user_id: int) -> bool:
     db_doc = db.query(Document).filter(Document.id == document_id, Document.user_id == user_id).first()
     if not db_doc:
         return False
         
+    # Resolve actual file path
+    actual_path = resolve_filepath(db_doc.filepath)
+    
     # Delete from database (cascade deletes chunks)
     db.delete(db_doc)
     db.commit()
     
     # Delete physical file
-    if os.path.exists(db_doc.filepath):
+    if os.path.exists(actual_path):
         try:
-            os.remove(db_doc.filepath)
+            os.remove(actual_path)
         except Exception:
             pass
             

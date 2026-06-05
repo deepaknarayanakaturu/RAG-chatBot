@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
+gunicorn
 pydantic
 email-validator
 
@@ -18,4 +19,3 @@ python-docx
 httpx
 
 scikit-learn
-sentence-transformers

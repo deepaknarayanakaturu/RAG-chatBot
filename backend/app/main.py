@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from app.config.settings import settings
 from app.database.db import engine, Base
 from app.api import auth, documents, chat, dashboard
 
@@ -16,11 +17,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 2. Configure CORS middleware for full-stack separation
+# 2. Configure CORS middleware
+origins = settings.CORS_ORIGINS
+allow_credentials = True
+
+# Browsers reject credentials with wildcard origin, so disable credentials for wildcard
+if origins == ["*"]:
+    allow_credentials = False
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -35,8 +43,9 @@ app.include_router(dashboard.router)
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)
 
-# Mount files inside static at /static path
-app.mount("/assets", StaticFiles(directory=static_dir), name="assets")
+# Mount files inside static at /assets path
+if os.path.isdir(static_dir):
+    app.mount("/assets", StaticFiles(directory=static_dir), name="assets")
 
 @app.get("/{full_path:path}")
 def serve_frontend(full_path: str):
